@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>pySocket WebSocket Test</title>
+</head>
+<body>
+  <h2>pySocket WebSocket Client</h2>
+
+  <input id="roomInput" type="text" placeholder="Room name" />
+  <button onclick="joinRoom()">Join Room</button>
+
+  <br><br>
+  <input id="messageInput" type="text" placeholder="Type message" />
+  <button onclick="sendMessage()">Send Message</button>
+
+  <input id="broadcastInput" type="text" placeholder="Broadcast message" />
+  <button onclick="sendBroadcast()">Broadcast</button>
+
+  <ul id="messages"></ul>
+
+  <script>
+    const socket = new WebSocket("ws://localhost:8765");
+
+    socket.onopen = () => {
+      console.log("Connected to pySocket");
+      emit("connect", {}); // optional initial connect event
+    };
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      console.log("Received:", message);
+
+      const li = document.createElement("li");
+      li.textContent = `[${message.event}] ${JSON.stringify(message.data)}`;
+      document.getElementById("messages").appendChild(li);
+    };
+
+    function emit(event, data) {
+      socket.send(JSON.stringify({ event, data }));
+    }
+
+    function joinRoom() {
+      const room = document.getElementById("roomInput").value;
+      emit("join", { room });
+    }
+
+    function sendMessage() {
+      const message = document.getElementById("messageInput").value;
+      const room = document.getElementById("roomInput").value;
+      emit("message", { room, message });
+    }
+    function sendBroadcast() {
+  const message = document.getElementById("broadcastInput").value;
+  emit("broadcast", { message });
+  }
+
+  
+  </script>
+</body>
+</html>
