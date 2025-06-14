@@ -1,0 +1,9 @@
+LICENSE
+README.md
+pyproject.toml
+setup.py
+pysocket.egg-info/PKG-INFO
+pysocket.egg-info/SOURCES.txt
+pysocket.egg-info/dependency_links.txt
+pysocket.egg-info/requires.txt
+pysocket.egg-info/top_level.txt
