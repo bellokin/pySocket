@@ -81,7 +81,7 @@ class PySocketServer:
         return json.dumps({"event": event, "data": data})
 
     async def handle_connection(self, connection: 'WebSocketConnection', path: str = None):
-        """Enhanced connection handler with keepalive"""
+        """Universal connection handler"""
         if not await self.apply_middleware(connection, path):
             return
         
@@ -91,12 +91,16 @@ class PySocketServer:
             await self.event_handlers['connect'](connection, None)
 
         try:
-            while not connection._closed:
+            last_active = asyncio.get_event_loop().time()
+            while not getattr(connection, '_closed', False):
                 try:
+                    # Handle both ASGI and raw WebSocket connections
+                    timeout = getattr(connection, '_ping_interval', 20)
                     message = await asyncio.wait_for(
                         connection.receive(),
-                        timeout=connection._ping_interval
+                        timeout=timeout
                     )
+                
                     if message is None:
                         break
                     
@@ -106,14 +110,18 @@ class PySocketServer:
                         data = payload.get("data")
                         if event in self.event_handlers:
                             await self.event_handlers[event](connection, data)
+                        last_active = asyncio.get_event_loop().time()
                     except json.JSONDecodeError:
                         await self.emit("error", {"message": "Invalid JSON"}, to=connection)
                     
-                    # Send periodic ping
-                    await connection.send_ping()
-                
+                    # Send ping if supported
+                    if hasattr(connection, 'send_ping'):
+                        await connection.send_ping()
+                    
                 except asyncio.TimeoutError:
-                    # Connection is idle but alive
+                    # Check if connection is stale
+                    if asyncio.get_event_loop().time() - last_active > 60:
+                        break
                     continue
                 
         except Exception as e:
