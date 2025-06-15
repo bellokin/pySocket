@@ -2,94 +2,107 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>pySocket WebSocket Test</title>
+  <title>pySocket Chat</title>
   <style>
     #messages li { margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee; }
     .system { color: blue; }
     .error { color: red; }
     .chat { color: green; }
+    .room { color: purple; }
   </style>
 </head>
 <body>
-  <h2>pySocket WebSocket Client</h2>
+  <h2>pySocket Chat Rooms</h2>
 
   <div>
-    <input id="roomInput" type="text" placeholder="Room name" />
-    <button onclick="joinRoom()">Join Room</button>
+    <input id="roomInput" type="text" placeholder="Room name" value="lobby">
+    <button onclick="connectToRoom()">Join Room</button>
+    <button onclick="disconnect()">Leave Room</button>
   </div>
 
-  <div>
-    <input id="messageInput" type="text" placeholder="Type message" />
-    <button onclick="sendMessage()">Send Message</button>
-  </div>
-
-  <div>
-    <input id="broadcastInput" type="text" placeholder="Broadcast message" />
-    <button onclick="sendBroadcast()">Broadcast</button>
+  <div id="chatControls" style="display:none;">
+    <input id="messageInput" type="text" placeholder="Type message">
+    <button onclick="sendMessage()">Send to Room</button>
+    <button onclick="sendBroadcast()">Broadcast to All</button>
   </div>
 
   <ul id="messages"></ul>
 
   <script>
-    const socket = new WebSocket("ws://localhost:8000");  // Changed to port 8000
+    let socket = null;
+    let currentRoom = null;
 
-    socket.onopen = () => {
-      addMessage("system", "Connected to pySocket server");
-      emit("connect", {});
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        addMessage(message.event, message.data);
-      } catch (e) {
-        addMessage("error", "Invalid message format");
+    function connectToRoom() {
+      const room = document.getElementById("roomInput").value.trim();
+      if (!room) {
+        addMessage("error", "Please enter a room name");
+        return;
       }
-    };
+      
+      if (socket) disconnect();
+      
+      currentRoom = room;
+      socket = new WebSocket(`ws://localhost:8000/ws/chat/${room}/`);
+      
+      socket.onopen = () => {
+        addMessage("system", `Joined room: ${room}`);
+        document.getElementById("chatControls").style.display = "block";
+        emit("join", { room });
+      };
+      
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          addMessage(message.event, message.data);
+        } catch (e) {
+          addMessage("error", "Invalid message: " + event.data);
+        }
+      };
+      
+      socket.onerror = (error) => {
+        addMessage("error", `Error: ${error.message}`);
+      };
+      
+      socket.onclose = () => {
+        addMessage("system", `Left room: ${currentRoom}`);
+        document.getElementById("chatControls").style.display = "none";
+        currentRoom = null;
+      };
+    }
 
-    socket.onerror = (error) => {
-      addMessage("error", `Connection error: ${error.message}`);
-    };
-
-    socket.onclose = () => {
-      addMessage("system", "Disconnected from server");
-    };
-
-    function emit(event, data) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ event, data }));
-      } else {
-        addMessage("error", "Connection is not open");
+    function disconnect() {
+      if (socket) {
+        emit("leave", { room: currentRoom });
+        socket.close();
       }
     }
 
-    function joinRoom() {
-      const room = document.getElementById("roomInput").value.trim();
-      if (room) {
-        emit("join", { room });
+    function emit(event, data) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event, data }));
       } else {
-        addMessage("error", "Please enter a room name");
+        addMessage("error", "Not connected");
       }
     }
 
     function sendMessage() {
       const message = document.getElementById("messageInput").value.trim();
-      const room = document.getElementById("roomInput").value.trim();
-      if (message && room) {
-        emit("message", { room, message });
+      if (message && currentRoom) {
+        emit("message", { 
+          room: currentRoom,
+          text: message 
+        });
         document.getElementById("messageInput").value = "";
-      } else {
-        addMessage("error", "Need both room and message");
       }
     }
 
     function sendBroadcast() {
-      const message = document.getElementById("broadcastInput").value.trim();
+      const message = document.getElementById("messageInput").value.trim();
       if (message) {
-        emit("broadcast", { message });
-        document.getElementById("broadcastInput").value = "";
-      } else {
-        addMessage("error", "Please enter a broadcast message");
+        emit("broadcast", { 
+          text: message 
+        });
+        document.getElementById("messageInput").value = "";
       }
     }
 
