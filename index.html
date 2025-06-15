@@ -3,59 +3,103 @@
 <head>
   <meta charset="UTF-8">
   <title>pySocket WebSocket Test</title>
+  <style>
+    #messages li { margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee; }
+    .system { color: blue; }
+    .error { color: red; }
+    .chat { color: green; }
+  </style>
 </head>
 <body>
   <h2>pySocket WebSocket Client</h2>
 
-  <input id="roomInput" type="text" placeholder="Room name" />
-  <button onclick="joinRoom()">Join Room</button>
+  <div>
+    <input id="roomInput" type="text" placeholder="Room name" />
+    <button onclick="joinRoom()">Join Room</button>
+  </div>
 
-  <br><br>
-  <input id="messageInput" type="text" placeholder="Type message" />
-  <button onclick="sendMessage()">Send Message</button>
+  <div>
+    <input id="messageInput" type="text" placeholder="Type message" />
+    <button onclick="sendMessage()">Send Message</button>
+  </div>
 
-  <input id="broadcastInput" type="text" placeholder="Broadcast message" />
-  <button onclick="sendBroadcast()">Broadcast</button>
+  <div>
+    <input id="broadcastInput" type="text" placeholder="Broadcast message" />
+    <button onclick="sendBroadcast()">Broadcast</button>
+  </div>
 
   <ul id="messages"></ul>
 
   <script>
-    const socket = new WebSocket("ws://localhost:8765");
+    const socket = new WebSocket("ws://localhost:8000");  // Changed to port 8000
 
     socket.onopen = () => {
-      console.log("Connected to pySocket");
-      emit("connect", {}); // optional initial connect event
+      addMessage("system", "Connected to pySocket server");
+      emit("connect", {});
     };
 
     socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log("Received:", message);
+      try {
+        const message = JSON.parse(event.data);
+        addMessage(message.event, message.data);
+      } catch (e) {
+        addMessage("error", "Invalid message format");
+      }
+    };
 
-      const li = document.createElement("li");
-      li.textContent = `[${message.event}] ${JSON.stringify(message.data)}`;
-      document.getElementById("messages").appendChild(li);
+    socket.onerror = (error) => {
+      addMessage("error", `Connection error: ${error.message}`);
+    };
+
+    socket.onclose = () => {
+      addMessage("system", "Disconnected from server");
     };
 
     function emit(event, data) {
-      socket.send(JSON.stringify({ event, data }));
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event, data }));
+      } else {
+        addMessage("error", "Connection is not open");
+      }
     }
 
     function joinRoom() {
-      const room = document.getElementById("roomInput").value;
-      emit("join", { room });
+      const room = document.getElementById("roomInput").value.trim();
+      if (room) {
+        emit("join", { room });
+      } else {
+        addMessage("error", "Please enter a room name");
+      }
     }
 
     function sendMessage() {
-      const message = document.getElementById("messageInput").value;
-      const room = document.getElementById("roomInput").value;
-      emit("message", { room, message });
+      const message = document.getElementById("messageInput").value.trim();
+      const room = document.getElementById("roomInput").value.trim();
+      if (message && room) {
+        emit("message", { room, message });
+        document.getElementById("messageInput").value = "";
+      } else {
+        addMessage("error", "Need both room and message");
+      }
     }
-    function sendBroadcast() {
-  const message = document.getElementById("broadcastInput").value;
-  emit("broadcast", { message });
-  }
 
-  
+    function sendBroadcast() {
+      const message = document.getElementById("broadcastInput").value.trim();
+      if (message) {
+        emit("broadcast", { message });
+        document.getElementById("broadcastInput").value = "";
+      } else {
+        addMessage("error", "Please enter a broadcast message");
+      }
+    }
+
+    function addMessage(type, content) {
+      const li = document.createElement("li");
+      li.className = type;
+      li.innerHTML = `<strong>[${type.toUpperCase()}]</strong> ${typeof content === 'object' ? JSON.stringify(content) : content}`;
+      document.getElementById("messages").appendChild(li);
+      li.scrollIntoView();
+    }
   </script>
 </body>
 </html>
