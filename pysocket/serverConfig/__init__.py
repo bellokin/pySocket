@@ -1,6 +1,7 @@
-# pysocket/__init__.py
-from .socketServer import PySocketServer  
-from ..connectionEngine.connection import WebSocketConnection
+from .socketServer import PySocketServer
+from .consumer import WebSocketConsumer
 
-__all__ = ['PySocketServer', 'WebSocketConnection']
- 
+__all__ = [
+    "PySocketServer",
+    "WebSocketConsumer",
+]

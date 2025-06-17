@@ -2,117 +2,268 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>pySocket Chat</title>
   <style>
-    #messages li { margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee; }
-    .system { color: blue; }
-    .error { color: red; }
-    .chat { color: green; }
-    .room { color: purple; }
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    h2 {
+      color: #333;
+      text-align: center;
+    }
+    #connectionControls, #chatControls {
+      margin: 15px 0;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    input, button {
+      padding: 8px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    input {
+      flex: 1;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    #messages {
+      list-style: none;
+      padding: 0;
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background-color: white;
+      padding: 10px;
+    }
+    #messages li {
+      margin: 5px 0;
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .system { color: #007bff; font-style: italic; }
+    .error { color: #dc3545; font-weight: bold; }
+    .chat { color: #28a745; }
+    .room { color: #6f42c1; }
+    .debug { color: #6c757d; font-size: 0.9em; }
+    .timestamp { color: #6c757d; font-size: 0.8em; margin-left: 10px; }
+    #status {
+      font-size: 0.9em;
+      color: #6c757d;
+      margin: 10px 0;
+    }
   </style>
 </head>
 <body>
   <h2>pySocket Chat Rooms</h2>
 
-  <div>
-    <input id="roomInput" type="text" placeholder="Room name" value="lobby">
-    <button onclick="connectToRoom()">Join Room</button>
-    <button onclick="disconnect()">Leave Room</button>
+  <div id="connectionControls">
+    <input id="roomInput" type="text" placeholder="Room name (leave empty for default)" value="lobby">
+    <button id="connectBtn" onclick="client.connectToRoom()">Join Room</button>
+    <button id="disconnectBtn" onclick="client.disconnect()" disabled>Leave Room</button>
   </div>
+
+  <div id="status">Status: Disconnected</div>
 
   <div id="chatControls" style="display:none;">
     <input id="messageInput" type="text" placeholder="Type message">
-    <button onclick="sendMessage()">Send to Room</button>
-    <button onclick="sendBroadcast()">Broadcast to All</button>
+    <button onclick="client.sendMessage()">Send to Room</button>
+    <button onclick="client.sendBroadcast()">Broadcast to All</button>
   </div>
 
   <ul id="messages"></ul>
 
   <script>
-    let socket = null;
-    let currentRoom = null;
-
-    function connectToRoom() {
-      const room = document.getElementById("roomInput").value.trim();
-      if (!room) {
-        addMessage("error", "Please enter a room name");
-        return;
+    class PySocketClient {
+      constructor() {
+        this.socket = null;
+        this.currentRoom = null;
+        this.clientId = `user_${Math.random().toString(36).substr(2, 9)}`;
+        this.connectBtn = document.getElementById("connectBtn");
+        this.disconnectBtn = document.getElementById("disconnectBtn");
+        this.roomInput = document.getElementById("roomInput");
+        this.messageInput = document.getElementById("messageInput");
+        this.chatControls = document.getElementById("chatControls");
+        this.messages = document.getElementById("messages");
+        this.status = document.getElementById("status");
+        this.pingInterval = null;
+        this.messageInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.sendMessage();
+        });
       }
-      
-      if (socket) disconnect();
-      
-      currentRoom = room;
-      socket = new WebSocket(`ws://localhost:8000/ws/chat/${room}/`);
-      
-      socket.onopen = () => {
-        addMessage("system", `Joined room: ${room}`);
-        document.getElementById("chatControls").style.display = "block";
-        emit("join", { room });
-      };
-      
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          addMessage(message.event, message.data);
-        } catch (e) {
-          addMessage("error", "Invalid message: " + event.data);
+
+      connectToRoom() {
+        const room = this.roomInput.value.trim();
+        const path = room ? `ws://localhost:8000/ws/chat/${room}` : 'ws://localhost:8000/ws/';
+        if (this.socket) this.disconnect();
+
+        this.currentRoom = room || 'default';
+        this.status.textContent = `Status: Connecting to ${this.currentRoom}...`;
+        this.socket = new WebSocket(path);
+
+        this.socket.onopen = () => {
+          this.addMessage('system', `Connected to ${this.currentRoom}`);
+          this.status.textContent = `Status: Connected to ${this.currentRoom} (Client ID: ${this.clientId})`;
+          this.chatControls.style.display = 'flex';
+          this.connectBtn.disabled = true;
+          this.disconnectBtn.disabled = false;
+          this.messageInput.focus();
+          if (room) this.emit('join', { room });
+          // Start ping interval
+          this.pingInterval = setInterval(() => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+              this.socket.send(JSON.stringify({ event: 'ping', data: {} }));
+            }
+          }, 30000);
+        };
+
+        this.socket.onmessage = (event) => {
+          this.addMessage('debug', `Received: ${event.data}`);
+          try {
+            const { event: type, data } = JSON.parse(event.data);
+            if (type === 'pong') {
+              this.addMessage('debug', 'Received pong');
+              return;
+            }
+            this.handleMessage(type, data);
+          } catch (e) {
+            this.addMessage('error', `Invalid message: ${event.data}`);
+          }
+        };
+
+        this.socket.onerror = (error) => {
+          this.addMessage('error', `Connection error: ${error.message || 'Unknown error'}`);
+          this.status.textContent = `Status: Error in ${this.currentRoom}`;
+          this.disconnect();
+        };
+
+        this.socket.onclose = () => {
+          this.addMessage('system', `Disconnected from ${this.currentRoom}`);
+          this.resetUI();
+        };
+      }
+
+      disconnect() {
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
         }
-      };
-      
-      socket.onerror = (error) => {
-        addMessage("error", `Error: ${error.message}`);
-      };
-      
-      socket.onclose = () => {
-        addMessage("system", `Left room: ${currentRoom}`);
-        document.getElementById("chatControls").style.display = "none";
-        currentRoom = null;
-      };
-    }
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          if (this.currentRoom !== 'default') {
+            this.emit('leave', { room: this.currentRoom });
+          }
+          this.socket.close();
+        }
+        this.resetUI();
+      }
 
-    function disconnect() {
-      if (socket) {
-        emit("leave", { room: currentRoom });
-        socket.close();
+      emit(event, data) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          try {
+            const payload = JSON.stringify({ event, data: { ...data, clientId: this.clientId } });
+            this.addMessage('debug', `Sent: ${event} ${JSON.stringify(data)}`);
+            this.socket.send(payload);
+          } catch (e) {
+            this.addMessage('error', `Send error: ${e.message}`);
+          }
+        } else {
+          this.addMessage('error', 'Not connected to server');
+        }
+      }
+
+      sendMessage() {
+        const message = this.messageInput.value.trim();
+        if (!message) {
+          this.addMessage('error', 'Message cannot be empty');
+          return;
+        }
+        if (this.currentRoom === 'default') {
+          this.emit('message', { text: message });
+        } else {
+          this.emit('message', { room: this.currentRoom, text: message });
+        }
+        this.messageInput.value = '';
+        this.messageInput.focus();
+      }
+
+      sendBroadcast() {
+        const message = this.messageInput.value.trim();
+        if (!message) {
+          this.addMessage('error', 'Message cannot be empty');
+          return;
+        }
+        this.emit('broadcast', { text: message });
+        this.messageInput.value = '';
+        this.messageInput.focus();
+      }
+
+      handleMessage(type, data) {
+        switch (type) {
+          case 'connected':
+            this.addMessage('room', data.message, data.timestamp);
+            break;
+          case 'room_joined':
+          case 'room_left':
+            this.addMessage('room', data.message, data.timestamp);
+            break;
+          case 'new_message':
+            this.addMessage('chat', `${data.from}: ${data.text} (Room: ${data.room})`, data.timestamp);
+            break;
+          case 'echo':
+            this.addMessage('chat', `Echo: ${data.message}`, data.timestamp);
+            break;
+          case 'error':
+            this.addMessage('error', data.message);
+            break;
+          default:
+            this.addMessage('error', `Unknown event: ${type}`);
+        }
+      }
+
+      addMessage(type, content, timestamp) {
+        const li = document.createElement('li');
+        li.className = type;
+        const timeStr = timestamp ? new Date(timestamp * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
+        li.innerHTML = `<strong>[${type.toUpperCase()}]</strong> ${content} <span class="timestamp">${timeStr}</span>`;
+        this.messages.appendChild(li);
+        li.scrollIntoView();
+      }
+
+      resetUI() {
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
+        }
+        this.socket = null;
+        this.currentRoom = null;
+        this.status.textContent = 'Status: Disconnected';
+        this.chatControls.style.display = 'none';
+        this.connectBtn.disabled = false;
+        this.disconnectBtn.disabled = true;
+        this.messageInput.value = '';
       }
     }
 
-    function emit(event, data) {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ event, data }));
-      } else {
-        addMessage("error", "Not connected");
-      }
-    }
-
-    function sendMessage() {
-      const message = document.getElementById("messageInput").value.trim();
-      if (message && currentRoom) {
-        emit("message", { 
-          room: currentRoom,
-          text: message 
-        });
-        document.getElementById("messageInput").value = "";
-      }
-    }
-
-    function sendBroadcast() {
-      const message = document.getElementById("messageInput").value.trim();
-      if (message) {
-        emit("broadcast", { 
-          text: message 
-        });
-        document.getElementById("messageInput").value = "";
-      }
-    }
-
-    function addMessage(type, content) {
-      const li = document.createElement("li");
-      li.className = type;
-      li.innerHTML = `<strong>[${type.toUpperCase()}]</strong> ${typeof content === 'object' ? JSON.stringify(content) : content}`;
-      document.getElementById("messages").appendChild(li);
-      li.scrollIntoView();
-    }
+    // Initialize client
+    const client = new PySocketClient();
   </script>
 </body>
 </html>
