@@ -104,18 +104,17 @@
         this.chatControls = document.getElementById("chatControls");
         this.messages = document.getElementById("messages");
         this.status = document.getElementById("status");
-        this.pingInterval = null;
         this.messageInput.addEventListener('keypress', (e) => {
           if (e.key === 'Enter') this.sendMessage();
         });
       }
 
       connectToRoom() {
-        const room = this.roomInput.value.trim();
-        const path = room ? `ws://localhost:8000/ws/chat/${room}` : 'ws://localhost:8000/ws/';
+        const room = this.roomInput.value.trim() || 'default';
+        const path = `ws://localhost:8000/ws/chat/${room}`;
         if (this.socket) this.disconnect();
 
-        this.currentRoom = room || 'default';
+        this.currentRoom = room;
         this.status.textContent = `Status: Connecting to ${this.currentRoom}...`;
         this.socket = new WebSocket(path);
 
@@ -126,23 +125,15 @@
           this.connectBtn.disabled = true;
           this.disconnectBtn.disabled = false;
           this.messageInput.focus();
-          if (room) this.emit('join', { room });
-          // Start ping interval
-          this.pingInterval = setInterval(() => {
-            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-              this.socket.send(JSON.stringify({ event: 'ping', data: {} }));
-            }
-          }, 30000);
+          
+          // Send join event with room name
+          this.emit('join', { room: this.currentRoom, clientId: this.clientId });
         };
 
         this.socket.onmessage = (event) => {
           this.addMessage('debug', `Received: ${event.data}`);
           try {
             const { event: type, data } = JSON.parse(event.data);
-            if (type === 'pong') {
-              this.addMessage('debug', 'Received pong');
-              return;
-            }
             this.handleMessage(type, data);
           } catch (e) {
             this.addMessage('error', `Invalid message: ${event.data}`);
@@ -162,14 +153,8 @@
       }
 
       disconnect() {
-        if (this.pingInterval) {
-          clearInterval(this.pingInterval);
-          this.pingInterval = null;
-        }
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-          if (this.currentRoom !== 'default') {
-            this.emit('leave', { room: this.currentRoom });
-          }
+          this.emit('leave', { room: this.currentRoom });
           this.socket.close();
         }
         this.resetUI();
@@ -178,7 +163,10 @@
       emit(event, data) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
           try {
-            const payload = JSON.stringify({ event, data: { ...data, clientId: this.clientId } });
+            const payload = JSON.stringify({ 
+              event, 
+              data: { ...data, clientId: this.clientId } 
+            });
             this.addMessage('debug', `Sent: ${event} ${JSON.stringify(data)}`);
             this.socket.send(payload);
           } catch (e) {
@@ -195,11 +183,11 @@
           this.addMessage('error', 'Message cannot be empty');
           return;
         }
-        if (this.currentRoom === 'default') {
-          this.emit('message', { text: message });
-        } else {
-          this.emit('message', { room: this.currentRoom, text: message });
-        }
+        this.emit('message', { 
+          room: this.currentRoom, 
+          text: message,
+          clientId: this.clientId
+        });
         this.messageInput.value = '';
         this.messageInput.focus();
       }
@@ -210,7 +198,10 @@
           this.addMessage('error', 'Message cannot be empty');
           return;
         }
-        this.emit('broadcast', { text: message });
+        this.emit('broadcast', { 
+          text: message,
+          clientId: this.clientId
+        });
         this.messageInput.value = '';
         this.messageInput.focus();
       }
@@ -225,16 +216,14 @@
             this.addMessage('room', data.message, data.timestamp);
             break;
           case 'new_message':
-            this.addMessage('chat', `${data.from}: ${data.text} (Room: ${data.room})`, data.timestamp);
-            break;
-          case 'echo':
-            this.addMessage('chat', `Echo: ${data.message}`, data.timestamp);
+            const fromLabel = data.from === this.clientId ? 'You' : data.from;
+            this.addMessage('chat', `${fromLabel}: ${data.text}`, data.timestamp);
             break;
           case 'error':
             this.addMessage('error', data.message);
             break;
           default:
-            this.addMessage('error', `Unknown event: ${type}`);
+            this.addMessage('debug', `Unknown event: ${type}`, data.timestamp);
         }
       }
 
@@ -248,10 +237,6 @@
       }
 
       resetUI() {
-        if (this.pingInterval) {
-          clearInterval(this.pingInterval);
-          this.pingInterval = null;
-        }
         this.socket = null;
         this.currentRoom = null;
         this.status.textContent = 'Status: Disconnected';

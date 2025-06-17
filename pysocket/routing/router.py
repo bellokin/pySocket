@@ -9,10 +9,9 @@ class Route:
         try:
             if not isinstance(pattern, str):
                 raise ValueError(f"Pattern must be a string, got {type(pattern)}")
-            # Add ^ and make trailing slash optional
-            pattern = pattern if pattern.startswith('^') else f'^{pattern}'
-            pattern = pattern.rstrip('$')  # Remove $ if present
-            pattern = f'{pattern.rstrip("/")}/?$'  # Make trailing slash optional
+            # Normalize pattern to include leading slash
+            pattern = pattern.lstrip('^')
+            pattern = f'^{pattern.lstrip("/")}'
             self.pattern = re.compile(pattern)
             self.callback = callback
             logger.debug(f"Created Route with pattern {self.pattern.pattern}")
@@ -35,10 +34,14 @@ class WebSocketRouter:
             raise
 
     def resolve(self, path: str) -> Optional[Callable]:
-        self.logger.debug(f"Resolving path: {path}")
+        self.logger.debug(f"Resolving path: {path} (raw: {repr(path)})")
+        # Normalize path to remove leading slash for matching
+        normalized_path = path.lstrip('/')
+        self.logger.debug(f"Normalized path: {normalized_path}")
         for pattern, callback in self.routes:
             self.logger.debug(f"Trying pattern: {pattern.pattern}")
-            match = pattern.match(path)
+            match = pattern.match(normalized_path)
+            self.logger.debug(f"Match result for {normalized_path} against {pattern.pattern}: {match}")
             if match:
                 self.logger.info(f"Resolved path {path} to callback {callback.__name__}")
                 return callback
